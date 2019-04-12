@@ -133,15 +133,15 @@ func (r *UnreliableSpoolWriter) Write(message []byte) error {
 	return err
 }
 
-type NoiseChannel struct {
+type UnreliableNoiseChannel struct {
 	reader *UnreliableSpoolReader
 	writer *UnreliableSpoolWriter
 }
 
-func (s *NoiseChannel) Read() ([]byte, error) {
+func (s *UnreliableNoiseChannel) Read() ([]byte, error) {
 	return s.reader.Read()
 }
 
-func (s *NoiseChannel) Write(message []byte) error {
+func (s *UnreliableNoiseChannel) Write(message []byte) error {
 	return s.writer.Write(message)
 }
