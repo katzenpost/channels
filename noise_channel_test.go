@@ -100,7 +100,10 @@ func TestSimpleNoiseChannel(t *testing.T) {
 
 	chanA, chanB := newTestNoiseChannelPair(t)
 
-	msg1 := []byte("fat")
+	msg1 := []byte(`Chaum’s 1981 paper 49 Untraceable Electronic Mail, Return Addresses, and
+Digital Pseudonyms, [Chaum81], suggests that a crucial privacy goal when
+sending an email is to hide who is communicating with whom. The metadata, in
+modern political parlance. The author offered mix nets for a solution. 50`)
 	err := chanA.Write(msg1)
 	assert.NoError(err)
 
@@ -108,7 +111,11 @@ func TestSimpleNoiseChannel(t *testing.T) {
 	assert.NoError(err)
 	assert.Equal(msg1, msg1Read)
 
-	msg2 := []byte("cat")
+	msg2 := []byte(`Chaum would go on to provide the founding ideas for anonymous electronic
+cash and electronic voting. His papers would routinely draw on overtly political
+motivations. 51 In a recent conversation, Chaum expressed surprise at the extent
+to which academics gravitated to a field—cryptography—so connected to issues
+of power. 52`)
 	err = chanB.Write(msg2)
 	assert.NoError(err)
 
