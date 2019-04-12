@@ -70,7 +70,7 @@ func newMockRemoteSpool() RemoteSpool {
 	}
 }
 
-func TestSimpleNoiseChannel(t *testing.T) {
+func newTestNoiseChannelPair(t *testing.T) (*UnreliableNoiseChannel, *UnreliableNoiseChannel) {
 	assert := assert.New(t)
 
 	receiverA := "receiver_A"
@@ -92,8 +92,16 @@ func TestSimpleNoiseChannel(t *testing.T) {
 	err = chanA.WithRemoteWriterDescriptor(chanBDescriptor)
 	assert.NoError(err)
 
+	return chanA, chanB
+}
+
+func TestSimpleNoiseChannel(t *testing.T) {
+	assert := assert.New(t)
+
+	chanA, chanB := newTestNoiseChannelPair(t)
+
 	msg1 := []byte("fat")
-	err = chanA.Write(msg1)
+	err := chanA.Write(msg1)
 	assert.NoError(err)
 
 	msg1Read, err := chanB.Read()
