@@ -1,4 +1,4 @@
-// noise.go - Noise based channel
+// noise_channel.go - Noise based mixnet communications channel
 // Copyright (C) 2019  David Stainton.
 //
 // This program is free software: you can redistribute it and/or modify
@@ -64,7 +64,7 @@ func (w *UnreliableNoiseWriterChannel) Write(spool RemoteSpool, message []byte) 
 	if len(blocks) != 1 {
 		return errors.New("message fragmentation not yet supported")
 	}
-	err = spool.AppendToSpool(w.spoolID[:], message, w.spoolReceiver, w.spoolProvider)
+	err = spool.AppendToSpool(w.spoolID[:], blocks[0], w.spoolReceiver, w.spoolProvider)
 	return err
 }
 
@@ -191,5 +191,8 @@ func (s *UnreliableNoiseChannel) Read() ([]byte, error) {
 }
 
 func (s *UnreliableNoiseChannel) Write(message []byte) error {
+	if s.writerChan == nil {
+		return errors.New("writerChan must not be nil")
+	}
 	return s.writerChan.Write(s.spool, message)
 }
