@@ -23,11 +23,15 @@ import (
 	"github.com/katzenpost/core/crypto/ecdh"
 	"github.com/katzenpost/core/crypto/eddsa"
 	"github.com/katzenpost/core/crypto/rand"
-	"github.com/katzenpost/minclient/block"
+	"github.com/katzenpost/noise"
 )
 
 const (
 	SpoolService = "spool"
+
+	NoiseOverhead = keyLength + macLength + keyLength + macLength // e, es, s, ss
+	keyLength     = 32
+	macLength     = 16
 )
 
 type RemoteSpool interface {
@@ -52,19 +56,27 @@ type UnreliableNoiseWriterChannel struct {
 }
 
 func (w *UnreliableNoiseWriterChannel) Write(spool RemoteSpool, message []byte) error {
-	mesgID := [block.MessageIDLength]byte{}
-	_, err := rand.NewMath().Read(mesgID[:])
+	cs := noise.NewCipherSuite(noise.DH25519, noise.CipherChaChaPoly, noise.HashSHA256)
+	senderDH := noise.DHKey{
+		Private: w.noisePrivateKey.Bytes(),
+		Public:  w.noisePrivateKey.PublicKey().Bytes(),
+	}
+	hs, err := noise.NewHandshakeState(noise.Config{
+		CipherSuite:   cs,
+		Random:        rand.Reader,
+		Pattern:       noise.HandshakeX,
+		Initiator:     true,
+		StaticKeypair: senderDH,
+		PeerStatic:    w.remoteNoisePublicKey.Bytes(),
+	})
 	if err != nil {
-		return nil
+		return err
 	}
-	blocks, err := block.EncryptMessage(&mesgID, message, w.noisePrivateKey, w.remoteNoisePublicKey)
+	ciphertext, _, _, err := hs.WriteMessage(nil, message)
 	if err != nil {
-		return nil
+		return err
 	}
-	if len(blocks) != 1 {
-		return errors.New("message fragmentation not yet supported")
-	}
-	err = spool.AppendToSpool(w.spoolID[:], blocks[0], w.spoolReceiver, w.spoolProvider)
+	err = spool.AppendToSpool(w.spoolID[:], ciphertext, w.spoolReceiver, w.spoolProvider)
 	return err
 }
 
@@ -124,17 +136,37 @@ func (s *UnreliableNoiseReaderChannel) Read(spool RemoteSpool) ([]byte, error) {
 		return nil, errors.New(spoolResponse.Status)
 	}
 	s.readOffset++
-	block, pubKey, err := block.DecryptBlock(spoolResponse.Message, s.noisePrivateKey)
+
+	// Decrypt the ciphertext into a plaintext.
+	cs := noise.NewCipherSuite(noise.DH25519, noise.CipherChaChaPoly, noise.HashSHA256)
+	recipientDH := noise.DHKey{
+		Private: s.noisePrivateKey.Bytes(),
+		Public:  s.noisePrivateKey.PublicKey().Bytes(),
+	}
+	hs, err := noise.NewHandshakeState(noise.Config{
+		CipherSuite:   cs,
+		Random:        rand.Reader,
+		Pattern:       noise.HandshakeX,
+		Initiator:     false,
+		StaticKeypair: recipientDH,
+		PeerStatic:    nil,
+	})
 	if err != nil {
 		return nil, err
 	}
-	if !s.remoteNoisePublicKey.Equal(pubKey) {
+	plaintext, _, _, err := hs.ReadMessage(nil, spoolResponse.Message)
+	if err != nil {
+		return nil, err
+	}
+
+	senderPk := new(ecdh.PublicKey)
+	if err = senderPk.FromBytes(hs.PeerStatic()); err != nil {
+		panic("BUG: block: Failed to de-serialize peer static key: " + err.Error())
+	}
+	if !s.remoteNoisePublicKey.Equal(senderPk) {
 		return nil, errors.New("wtf, wrong partner Noise X key")
 	}
-	if block.TotalBlocks != 1 {
-		return nil, errors.New("block error, one block per message required")
-	}
-	return block.Payload, nil
+	return plaintext, nil
 }
 
 type UnreliableNoiseChannel struct {
