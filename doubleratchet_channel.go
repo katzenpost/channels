@@ -17,11 +17,13 @@
 package channels
 
 import (
-	"encoding/json"
+	"encoding/binary"
 
 	"github.com/katzenpost/core/crypto/rand"
 	"github.com/status-im/doubleratchet"
 )
+
+const DoubleRatchetOverhead = 144
 
 type UnreliableDoubleRatchetChannelDescriptor struct {
 	publicKey        doubleratchet.Key
@@ -98,19 +100,24 @@ func (r *UnreliableDoubleRatchetChannel) GetDescriptor() *UnreliableDoubleRatche
 
 func (r *UnreliableDoubleRatchetChannel) Write(message []byte) error {
 	mesgHE := r.ratchet.RatchetEncrypt(message, nil)
-	js, err := json.Marshal(&mesgHE)
-	if err != nil {
-		return err
-	}
-	return r.noiseCh.Write(js)
+	ciphertext := make([]byte, len(mesgHE.Header)+len(mesgHE.Ciphertext)+8)
+	binary.BigEndian.PutUint32(ciphertext[:4], uint32(len(mesgHE.Header)))
+	copy(ciphertext[4:], mesgHE.Header)
+	binary.BigEndian.PutUint32(ciphertext[4+len(mesgHE.Header):], uint32(len(mesgHE.Ciphertext)))
+	copy(ciphertext[4+len(mesgHE.Header)+4:], mesgHE.Ciphertext)
+	return r.noiseCh.Write(ciphertext)
 }
 
 func (r *UnreliableDoubleRatchetChannel) Read() ([]byte, error) {
-	mesgJS, err := r.noiseCh.Read()
+	mesgRaw, err := r.noiseCh.Read()
 	if err != nil {
 		return nil, err
 	}
-	mesgHE := &doubleratchet.MessageHE{}
-	json.Unmarshal(mesgJS, mesgHE)
+	headerLen := binary.BigEndian.Uint32(mesgRaw[:4])
+	ciphertextLen := binary.BigEndian.Uint32(mesgRaw[4+headerLen : 4+headerLen+4])
+	mesgHE := &doubleratchet.MessageHE{
+		Header:     mesgRaw[4 : headerLen+4],
+		Ciphertext: mesgRaw[4+headerLen+4 : ciphertextLen+4+headerLen+4],
+	}
 	return r.ratchet.RatchetDecrypt(*mesgHE, nil)
 }
