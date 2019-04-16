@@ -123,3 +123,11 @@ of power. 52`)
 	assert.NoError(err)
 	assert.Equal(msg2, msg2Read)
 }
+
+func TestSimpleNoiseChannelSerialize(t *testing.T) {
+	assert := assert.New(t)
+	chanA, _ := newTestNoiseChannelPair(t)
+	s, err := chanA.Serialize()
+	assert.NoError(err)
+	assert.True(len(s) > 1)
+}
