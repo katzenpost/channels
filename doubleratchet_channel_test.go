@@ -17,8 +17,11 @@
 package channels
 
 import (
-	"github.com/stretchr/testify/assert"
 	"testing"
+
+	"github.com/katzenpost/core/constants"
+	"github.com/katzenpost/memspool/common"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestSimpleDoubleRatchet(t *testing.T) {
@@ -139,4 +142,41 @@ func TestSerializationOfTheDoubleRatchet(t *testing.T) {
 	assert.NoError(err)
 	assert.Equal(msg2, msg2Read)
 
+}
+
+func TestDoubleRatchetPadding(t *testing.T) {
+	assert := assert.New(t)
+
+	chanA, chanB := newTestNoiseChannelPair(t)
+
+	ratchetChanA, err := NewUnreliableDoubleRatchetChannel(chanA)
+	assert.NoError(err)
+	ratchetChanB, err := NewUnreliableDoubleRatchetChannel(chanB)
+	assert.NoError(err)
+
+	kxA, err := ratchetChanA.KeyExchange()
+	assert.NoError(err)
+	kxB, err := ratchetChanB.KeyExchange()
+	assert.NoError(err)
+
+	err = ratchetChanA.ProcessKeyExchange(kxB)
+	assert.NoError(err)
+	err = ratchetChanB.ProcessKeyExchange(kxA)
+	assert.NoError(err)
+
+	msg1 := []byte("test message one")
+	err = ratchetChanA.Write(msg1)
+	assert.NoError(err)
+
+	mock, ok := chanA.spoolService.(*mockRemoteSpool)
+	assert.True(ok)
+
+	spoolID := [common.SpoolIDSize]byte{}
+	copy(spoolID[:], chanA.SpoolWriterChan.SpoolID)
+	message := mock.spool[spoolID][uint32(mock.count-1)]
+	t.Logf("spool id %x", chanA.SpoolWriterChan.SpoolID)
+	t.Logf("message len is %d must be equal or less than %d", len(message), constants.UserForwardPayloadLength)
+	if len(message) > constants.UserForwardPayloadLength {
+		t.Fatal("ciphertext length must not exceed Sphinx packet payload maximum")
+	}
 }

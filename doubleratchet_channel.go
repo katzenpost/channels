@@ -17,13 +17,22 @@
 package channels
 
 import (
-	"github.com/katzenpost/client/session"
+	"encoding/binary"
+	"errors"
+
+	"github.com/katzenpost/core/constants"
 	"github.com/katzenpost/core/crypto/rand"
 	ratchet "github.com/katzenpost/doubleratchet"
+	"github.com/katzenpost/memspool/client"
 	"github.com/ugorji/go/codec"
 )
 
-const DoubleRatchetOverhead = 144
+const (
+	DoubleRatchetOverhead = 144
+	CBOROverhead          = 24
+	PayloadLength         = constants.UserForwardPayloadLength - DoubleRatchetOverhead - NoiseOverhead
+	PayloadOutputLength   = PayloadLength + CBOROverhead - (4 + 75)
+)
 
 type UnreliableDoubleRatchetChannel struct {
 	NoiseCh *UnreliableNoiseChannel
@@ -50,8 +59,14 @@ func (r *UnreliableDoubleRatchetChannel) KeyExchange() ([]byte, error) {
 }
 
 func (r *UnreliableDoubleRatchetChannel) Write(message []byte) error {
-	ciphertext := r.Ratchet.Encrypt(nil, message)
-	return r.NoiseCh.Write(ciphertext)
+	if len(message) > PayloadLength {
+		return errors.New("exceeds payload maximum")
+	}
+	payload := [PayloadOutputLength]byte{}
+	binary.BigEndian.PutUint32(payload[:4], uint32(len(message)))
+	copy(payload[4:], message)
+	ciphertext := r.Ratchet.Encrypt(nil, payload[:])
+	return r.NoiseCh.Write(ciphertext[:])
 }
 
 func (r *UnreliableDoubleRatchetChannel) Read() ([]byte, error) {
@@ -59,7 +74,12 @@ func (r *UnreliableDoubleRatchetChannel) Read() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return r.Ratchet.Decrypt(ciphertext)
+	plaintext, err := r.Ratchet.Decrypt(ciphertext)
+	if err != nil {
+		return nil, err
+	}
+	payloadLen := binary.BigEndian.Uint32(plaintext[:4])
+	return plaintext[4 : 4+payloadLen], nil
 }
 
 func (s *UnreliableDoubleRatchetChannel) Save() ([]byte, error) {
@@ -71,7 +91,7 @@ func (s *UnreliableDoubleRatchetChannel) Save() ([]byte, error) {
 	return serialized, nil
 }
 
-func Load(data []byte, spoolService session.SpoolService) (*UnreliableDoubleRatchetChannel, error) {
+func Load(data []byte, spoolService client.SpoolService) (*UnreliableDoubleRatchetChannel, error) {
 	var err error
 	s := new(UnreliableDoubleRatchetChannel)
 	s.Ratchet, err = ratchet.New(rand.Reader)
