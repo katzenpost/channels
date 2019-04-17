@@ -127,7 +127,7 @@ of power. 52`)
 func TestSimpleNoiseChannelSerialize(t *testing.T) {
 	assert := assert.New(t)
 	chanA, _ := newTestNoiseChannelPair(t)
-	s, err := chanA.Serialize()
+	s, err := chanA.MarshalBinary()
 	assert.NoError(err)
 	assert.True(len(s) > 1)
 }

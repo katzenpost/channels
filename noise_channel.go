@@ -237,7 +237,7 @@ func (s *UnreliableNoiseChannel) Write(message []byte) error {
 	return s.writerChan.Write(s.spool, message)
 }
 
-func (s *UnreliableNoiseChannel) Serialize() ([]byte, error) {
+func (s *UnreliableNoiseChannel) MarshalBinary() ([]byte, error) {
 	var serialized []byte
 	enc := codec.NewEncoderBytes(&serialized, cborHandle)
 	solo := SerializedUnreliableNoiseChannel{
