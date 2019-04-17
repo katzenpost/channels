@@ -17,66 +17,10 @@
 package channels
 
 import (
-	"fmt"
 	"testing"
 
-	"github.com/katzenpost/client/multispool"
-	"github.com/katzenpost/client/session"
-	"github.com/katzenpost/core/crypto/eddsa"
 	"github.com/stretchr/testify/assert"
 )
-
-type mockRemoteSpool struct {
-	count  byte
-	spool  map[[multispool.SpoolIDSize]byte]map[uint32][]byte
-	offset map[[multispool.SpoolIDSize]byte]uint32
-}
-
-func (m *mockRemoteSpool) CreateSpool(privateKey *eddsa.PrivateKey, spoolReceiver string, spoolProvider string) ([]byte, error) {
-	id := [multispool.SpoolIDSize]byte{}
-	id[0] = m.count
-	fmt.Printf("create spool %d\n", id)
-	m.count++
-	m.spool[id] = make(map[uint32][]byte)
-	m.offset[id] = 1
-	return id[:], nil
-}
-
-func (m *mockRemoteSpool) ReadFromSpool(spoolID []byte, messageID uint32, privateKey *eddsa.PrivateKey, spoolReceiver string, spoolProvider string) (*multispool.SpoolResponse, error) {
-	id := [multispool.SpoolIDSize]byte{}
-	copy(id[:], spoolID)
-	fmt.Printf("read from spool %d\n", id)
-	response := multispool.SpoolResponse{
-		SpoolID: id[:],
-		Message: m.spool[id][messageID],
-		Status:  "OK",
-	}
-	return &response, nil
-}
-
-func (m *mockRemoteSpool) AppendToSpool(spoolID []byte, message []byte, spoolReceiver string, spoolProvider string) error {
-	fmt.Printf("Append to spool ID %d\n", spoolID)
-	id := [multispool.SpoolIDSize]byte{}
-	copy(id[:], spoolID)
-	m.spool[id][m.offset[id]] = message
-	m.offset[id]++
-	return nil
-}
-
-func (m *mockRemoteSpool) PurgeSpool(spoolID []byte, privKey *eddsa.PrivateKey, recipient, provider string) error {
-	id := [multispool.SpoolIDSize]byte{}
-	copy(id[:], spoolID)
-	m.spool[id] = make(map[uint32][]byte)
-	return nil
-}
-
-func newMockRemoteSpool() session.SpoolService {
-	return &mockRemoteSpool{
-		spool:  make(map[[multispool.SpoolIDSize]byte]map[uint32][]byte),
-		offset: make(map[[multispool.SpoolIDSize]byte]uint32),
-		count:  0,
-	}
-}
 
 func newTestNoiseChannelPair(t *testing.T) (*UnreliableNoiseChannel, *UnreliableNoiseChannel) {
 	assert := assert.New(t)
@@ -92,12 +36,12 @@ func newTestNoiseChannelPair(t *testing.T) (*UnreliableNoiseChannel, *Unreliable
 	chanB, err := NewUnreliableNoiseChannel(receiverB, providerB, remoteSpool)
 	assert.NoError(err)
 
-	chanADescriptor := chanA.DescribeWriter()
-	err = chanB.WithRemoteWriterDescriptor(chanADescriptor)
+	chanADescriptor := chanA.GetRemoteWriter()
+	chanB.WithRemoteWriter(chanADescriptor)
 	assert.NoError(err)
 
-	chanBDescriptor := chanB.DescribeWriter()
-	err = chanA.WithRemoteWriterDescriptor(chanBDescriptor)
+	chanBDescriptor := chanB.GetRemoteWriter()
+	chanA.WithRemoteWriter(chanBDescriptor)
 	assert.NoError(err)
 
 	return chanA, chanB
@@ -149,12 +93,11 @@ modern political parlance. The author offered mix nets for a solution. 50`)
 	assert.Equal(msg1, msg1Read)
 
 	// then we replace chanA with chanC
-	chanCSerialized, err := chanA.MarshalBinary()
+	chanCSerialized, err := chanA.Save()
 	assert.NoError(err)
 	assert.True(len(chanCSerialized) > 1)
 
-	chanC := new(UnreliableNoiseChannel)
-	err = chanC.UnmarshalBinary(chanCSerialized)
+	chanC, err := LoadUnreliableNoiseChannel(chanCSerialized, chanA.spoolService)
 	assert.NoError(err)
 	chanC.SetSpoolService(chanA.spoolService)
 

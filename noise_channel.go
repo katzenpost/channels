@@ -19,10 +19,9 @@ package channels
 import (
 	"errors"
 
-	"github.com/katzenpost/client/session"
 	"github.com/katzenpost/core/crypto/ecdh"
-	"github.com/katzenpost/core/crypto/eddsa"
 	"github.com/katzenpost/core/crypto/rand"
+	"github.com/katzenpost/memspool/client"
 	"github.com/katzenpost/noise"
 	"github.com/ugorji/go/codec"
 )
@@ -33,110 +32,67 @@ const (
 	macLength     = 16
 )
 
-var cborHandle = new(codec.CborHandle)
-
 type NoiseWriterDescriptor struct {
-	SpoolID              []byte
-	SpoolReceiver        string
-	SpoolProvider        string
+	SpoolWriterChan      *UnreliableSpoolWriterChannel
 	RemoteNoisePublicKey *ecdh.PublicKey
 }
 
-type UnreliableNoiseWriterChannel struct {
-	SpoolID              []byte
-	SpoolReceiver        string
-	SpoolProvider        string
+type UnreliableNoiseChannel struct {
+	spoolService client.SpoolService
+
+	SpoolWriterChan      *UnreliableSpoolWriterChannel
 	RemoteNoisePublicKey *ecdh.PublicKey
-	NoisePrivateKey      *ecdh.PrivateKey
+
+	SpoolReaderChan *UnreliableSpoolReaderChannel
+	NoisePrivateKey *ecdh.PrivateKey
+	ReadOffset      uint32
 }
 
-func (w *UnreliableNoiseWriterChannel) Write(spool session.SpoolService, message []byte) error {
-	cs := noise.NewCipherSuite(noise.DH25519, noise.CipherChaChaPoly, noise.HashSHA256)
-	senderDH := noise.DHKey{
-		Private: w.NoisePrivateKey.Bytes(),
-		Public:  w.NoisePrivateKey.PublicKey().Bytes(),
-	}
-	hs, err := noise.NewHandshakeState(noise.Config{
-		CipherSuite:   cs,
-		Random:        rand.Reader,
-		Pattern:       noise.HandshakeX,
-		Initiator:     true,
-		StaticKeypair: senderDH,
-		PeerStatic:    w.RemoteNoisePublicKey.Bytes(),
-	})
-	if err != nil {
-		return err
-	}
-	ciphertext, _, _, err := hs.WriteMessage(nil, message)
-	if err != nil {
-		return err
-	}
-	err = spool.AppendToSpool(w.SpoolID[:], ciphertext, w.SpoolReceiver, w.SpoolProvider)
-	return err
-}
-
-type UnreliableNoiseReaderChannel struct {
-	SpoolPrivateKey      *eddsa.PrivateKey
-	SpoolID              []byte
-	SpoolReceiver        string
-	SpoolProvider        string
-	ReadOffset           uint32
-	NoisePrivateKey      *ecdh.PrivateKey
-	RemoteNoisePublicKey *ecdh.PublicKey
-}
-
-func NewUnreliableNoiseReaderChannel(spoolReceiver, spoolProvider string, spool session.SpoolService) (*UnreliableNoiseReaderChannel, error) {
-	// generate keys
-	spoolPrivateKey, err := eddsa.NewKeypair(rand.Reader)
-	if err != nil {
-		return nil, err
-	}
+func NewUnreliableNoiseChannel(spoolReceiver, spoolProvider string, spool client.SpoolService) (*UnreliableNoiseChannel, error) {
 	noisePrivateKey, err := ecdh.NewKeypair(rand.Reader)
 	if err != nil {
 		return nil, err
 	}
-
-	// create spool on remote Provider
-	spoolID, err := spool.CreateSpool(spoolPrivateKey, spoolReceiver, spoolProvider)
+	spoolReader, err := NewUnreliableSpoolReaderChannel(spoolReceiver, spoolProvider, spool)
 	if err != nil {
 		return nil, err
 	}
-
-	return &UnreliableNoiseReaderChannel{
-		SpoolPrivateKey:      spoolPrivateKey,
-		SpoolID:              spoolID,
-		SpoolReceiver:        spoolReceiver,
-		SpoolProvider:        spoolProvider,
-		ReadOffset:           1,
-		NoisePrivateKey:      noisePrivateKey,
+	return &UnreliableNoiseChannel{
+		spoolService:         spool,
+		SpoolWriterChan:      nil,
 		RemoteNoisePublicKey: nil,
+		SpoolReaderChan:      spoolReader,
+		NoisePrivateKey:      noisePrivateKey,
+		ReadOffset:           1,
 	}, nil
 }
 
-func (r *UnreliableNoiseReaderChannel) DescribeWriter() *NoiseWriterDescriptor {
+func (n *UnreliableNoiseChannel) WithRemoteWriter(writerDesc *NoiseWriterDescriptor) {
+	if writerDesc.SpoolWriterChan == nil || writerDesc.RemoteNoisePublicKey == nil {
+		panic("writer channel must not be nil")
+	}
+	n.SpoolWriterChan = writerDesc.SpoolWriterChan
+	n.RemoteNoisePublicKey = writerDesc.RemoteNoisePublicKey
+}
+
+func (n *UnreliableNoiseChannel) GetRemoteWriter() *NoiseWriterDescriptor {
 	return &NoiseWriterDescriptor{
-		SpoolID:              r.SpoolID,
-		SpoolReceiver:        r.SpoolReceiver,
-		SpoolProvider:        r.SpoolProvider,
-		RemoteNoisePublicKey: r.NoisePrivateKey.PublicKey(),
+		SpoolWriterChan:      n.SpoolReaderChan.GetSpoolWriter(),
+		RemoteNoisePublicKey: n.NoisePrivateKey.PublicKey(),
 	}
 }
 
-func (s *UnreliableNoiseReaderChannel) Read(spool session.SpoolService) ([]byte, error) {
-	spoolResponse, err := spool.ReadFromSpool(s.SpoolID[:], s.ReadOffset, s.SpoolPrivateKey, s.SpoolReceiver, s.SpoolProvider)
+func (n *UnreliableNoiseChannel) Read() ([]byte, error) {
+	ciphertext, err := n.SpoolReaderChan.Read(n.spoolService)
 	if err != nil {
 		return nil, err
 	}
-	if spoolResponse.Status != "OK" {
-		return nil, errors.New(spoolResponse.Status)
-	}
-	s.ReadOffset++
 
 	// Decrypt the ciphertext into a plaintext.
 	cs := noise.NewCipherSuite(noise.DH25519, noise.CipherChaChaPoly, noise.HashSHA256)
 	recipientDH := noise.DHKey{
-		Private: s.NoisePrivateKey.Bytes(),
-		Public:  s.NoisePrivateKey.PublicKey().Bytes(),
+		Private: n.NoisePrivateKey.Bytes(),
+		Public:  n.NoisePrivateKey.PublicKey().Bytes(),
 	}
 	hs, err := noise.NewHandshakeState(noise.Config{
 		CipherSuite:   cs,
@@ -149,110 +105,66 @@ func (s *UnreliableNoiseReaderChannel) Read(spool session.SpoolService) ([]byte,
 	if err != nil {
 		return nil, err
 	}
-	plaintext, _, _, err := hs.ReadMessage(nil, spoolResponse.Message)
+	plaintext, _, _, err := hs.ReadMessage(nil, ciphertext)
 	if err != nil {
 		return nil, err
 	}
 
+	// Check that the sender's static Noise X key is the key we expected.
 	senderPk := new(ecdh.PublicKey)
 	if err = senderPk.FromBytes(hs.PeerStatic()); err != nil {
 		panic("BUG: block: Failed to de-serialize peer static key: " + err.Error())
 	}
-	if !s.RemoteNoisePublicKey.Equal(senderPk) {
+	if !n.RemoteNoisePublicKey.Equal(senderPk) {
 		return nil, errors.New("wtf, wrong partner Noise X key")
 	}
+
 	return plaintext, nil
 }
 
-type SerializedUnreliableNoiseChannel struct {
-	WriterChan *UnreliableNoiseWriterChannel
-	ReaderChan *UnreliableNoiseReaderChannel
-}
-
-type UnreliableNoiseChannel struct {
-	spoolService session.SpoolService
-	writerChan   *UnreliableNoiseWriterChannel
-	readerChan   *UnreliableNoiseReaderChannel
-}
-
-func NewUnreliableNoiseChannel(spoolReceiver, spoolProvider string, spool session.SpoolService) (*UnreliableNoiseChannel, error) {
-	readerChan, err := NewUnreliableNoiseReaderChannel(spoolReceiver, spoolProvider, spool)
+func (n *UnreliableNoiseChannel) Write(message []byte) error {
+	cs := noise.NewCipherSuite(noise.DH25519, noise.CipherChaChaPoly, noise.HashSHA256)
+	senderDH := noise.DHKey{
+		Private: n.NoisePrivateKey.Bytes(),
+		Public:  n.NoisePrivateKey.PublicKey().Bytes(),
+	}
+	hs, err := noise.NewHandshakeState(noise.Config{
+		CipherSuite:   cs,
+		Random:        rand.Reader,
+		Pattern:       noise.HandshakeX,
+		Initiator:     true,
+		StaticKeypair: senderDH,
+		PeerStatic:    n.RemoteNoisePublicKey.Bytes(),
+	})
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return &UnreliableNoiseChannel{
-		spoolService: spool,
-		readerChan:   readerChan,
-		writerChan:   nil,
-	}, nil
-}
-
-func NewUnreliableNoiseChannelWithRemoteDescriptor(spoolReceiver, spoolProvider string, spoolService session.SpoolService, writerDesc *NoiseWriterDescriptor) (*UnreliableNoiseChannel, error) {
-	noiseChan, err := NewUnreliableNoiseChannel(spoolReceiver, spoolProvider, spoolService)
+	ciphertext, _, _, err := hs.WriteMessage(nil, message)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	err = noiseChan.WithRemoteWriterDescriptor(writerDesc)
-	if err != nil {
-		return nil, err
-	}
-	return noiseChan, nil
+	return n.SpoolWriterChan.Write(n.spoolService, ciphertext)
 }
 
-func (s *UnreliableNoiseChannel) DescribeWriter() *NoiseWriterDescriptor {
-	return s.readerChan.DescribeWriter()
+func (n *UnreliableNoiseChannel) SetSpoolService(spoolService client.SpoolService) {
+	n.spoolService = spoolService
 }
 
-func (s *UnreliableNoiseChannel) WithRemoteWriterDescriptor(writerDesc *NoiseWriterDescriptor) error {
-	if s.writerChan != nil {
-		return errors.New("writerChan must be nil")
-	}
-	s.writerChan = &UnreliableNoiseWriterChannel{
-		SpoolID:              writerDesc.SpoolID,
-		SpoolReceiver:        writerDesc.SpoolReceiver,
-		SpoolProvider:        writerDesc.SpoolProvider,
-		RemoteNoisePublicKey: writerDesc.RemoteNoisePublicKey,
-		NoisePrivateKey:      s.readerChan.NoisePrivateKey,
-	}
-	s.readerChan.RemoteNoisePublicKey = writerDesc.RemoteNoisePublicKey
-	return nil
-}
-
-func (s *UnreliableNoiseChannel) Read() ([]byte, error) {
-	return s.readerChan.Read(s.spoolService)
-}
-
-func (s *UnreliableNoiseChannel) Write(message []byte) error {
-	if s.writerChan == nil {
-		return errors.New("writerChan must not be nil")
-	}
-	return s.writerChan.Write(s.spoolService, message)
-}
-
-func (s *UnreliableNoiseChannel) MarshalBinary() ([]byte, error) {
+func (n *UnreliableNoiseChannel) Save() ([]byte, error) {
 	var serialized []byte
 	enc := codec.NewEncoderBytes(&serialized, cborHandle)
-	solo := SerializedUnreliableNoiseChannel{
-		WriterChan: s.writerChan,
-		ReaderChan: s.readerChan,
-	}
-	if err := enc.Encode(solo); err != nil {
+	if err := enc.Encode(n); err != nil {
 		return nil, err
 	}
 	return serialized, nil
 }
 
-func (s *UnreliableNoiseChannel) UnmarshalBinary(data []byte) error {
-	n := new(SerializedUnreliableNoiseChannel)
-	err := codec.NewDecoderBytes(data, cborHandle).Decode(&n)
+func LoadUnreliableNoiseChannel(data []byte, spoolService client.SpoolService) (*UnreliableNoiseChannel, error) {
+	n := new(UnreliableNoiseChannel)
+	err := codec.NewDecoderBytes(data, cborHandle).Decode(n)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	s.writerChan = n.WriterChan
-	s.readerChan = n.ReaderChan
-	return nil
-}
-
-func (s *UnreliableNoiseChannel) SetSpoolService(spoolService session.SpoolService) {
-	s.spoolService = spoolService
+	n.SetSpoolService(spoolService)
+	return n, nil
 }
