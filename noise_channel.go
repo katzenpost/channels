@@ -19,7 +19,7 @@ package channels
 import (
 	"errors"
 
-	"github.com/katzenpost/client/multispool"
+	"github.com/katzenpost/client/session"
 	"github.com/katzenpost/core/crypto/ecdh"
 	"github.com/katzenpost/core/crypto/eddsa"
 	"github.com/katzenpost/core/crypto/rand"
@@ -28,20 +28,12 @@ import (
 )
 
 const (
-	SpoolService = "spool"
-
 	NoiseOverhead = keyLength + macLength + keyLength + macLength // e, es, s, ss
 	keyLength     = 32
 	macLength     = 16
 )
 
 var cborHandle = new(codec.CborHandle)
-
-type RemoteSpool interface {
-	CreateSpool(privateKey *eddsa.PrivateKey, spoolReceiver string, spoolProvider string) ([]byte, error)
-	ReadFromSpool(spoolID []byte, count uint32, privateKey *eddsa.PrivateKey, spoolReceiver string, spoolProvider string) (*multispool.SpoolResponse, error)
-	AppendToSpool(spoolID []byte, message []byte, spoolReceiver string, spoolProvider string) error
-}
 
 type NoiseWriterDescriptor struct {
 	SpoolID              []byte
@@ -58,7 +50,7 @@ type UnreliableNoiseWriterChannel struct {
 	NoisePrivateKey      *ecdh.PrivateKey
 }
 
-func (w *UnreliableNoiseWriterChannel) Write(spool RemoteSpool, message []byte) error {
+func (w *UnreliableNoiseWriterChannel) Write(spool session.SpoolService, message []byte) error {
 	cs := noise.NewCipherSuite(noise.DH25519, noise.CipherChaChaPoly, noise.HashSHA256)
 	senderDH := noise.DHKey{
 		Private: w.NoisePrivateKey.Bytes(),
@@ -93,7 +85,7 @@ type UnreliableNoiseReaderChannel struct {
 	RemoteNoisePublicKey *ecdh.PublicKey
 }
 
-func NewUnreliableNoiseReaderChannel(spoolReceiver, spoolProvider string, spool RemoteSpool) (*UnreliableNoiseReaderChannel, error) {
+func NewUnreliableNoiseReaderChannel(spoolReceiver, spoolProvider string, spool session.SpoolService) (*UnreliableNoiseReaderChannel, error) {
 	// generate keys
 	spoolPrivateKey, err := eddsa.NewKeypair(rand.Reader)
 	if err != nil {
@@ -130,7 +122,7 @@ func (r *UnreliableNoiseReaderChannel) DescribeWriter() *NoiseWriterDescriptor {
 	}
 }
 
-func (s *UnreliableNoiseReaderChannel) Read(spool RemoteSpool) ([]byte, error) {
+func (s *UnreliableNoiseReaderChannel) Read(spool session.SpoolService) ([]byte, error) {
 	spoolResponse, err := spool.ReadFromSpool(s.SpoolID[:], s.ReadOffset, s.SpoolPrivateKey, s.SpoolReceiver, s.SpoolProvider)
 	if err != nil {
 		return nil, err
@@ -178,25 +170,25 @@ type SerializedUnreliableNoiseChannel struct {
 }
 
 type UnreliableNoiseChannel struct {
-	spool      RemoteSpool
-	writerChan *UnreliableNoiseWriterChannel
-	readerChan *UnreliableNoiseReaderChannel
+	spoolService session.SpoolService
+	writerChan   *UnreliableNoiseWriterChannel
+	readerChan   *UnreliableNoiseReaderChannel
 }
 
-func NewUnreliableNoiseChannel(spoolReceiver, spoolProvider string, spool RemoteSpool) (*UnreliableNoiseChannel, error) {
+func NewUnreliableNoiseChannel(spoolReceiver, spoolProvider string, spool session.SpoolService) (*UnreliableNoiseChannel, error) {
 	readerChan, err := NewUnreliableNoiseReaderChannel(spoolReceiver, spoolProvider, spool)
 	if err != nil {
 		return nil, err
 	}
 	return &UnreliableNoiseChannel{
-		spool:      spool,
-		readerChan: readerChan,
-		writerChan: nil,
+		spoolService: spool,
+		readerChan:   readerChan,
+		writerChan:   nil,
 	}, nil
 }
 
-func NewUnreliableNoiseChannelWithRemoteDescriptor(spoolReceiver, spoolProvider string, spool RemoteSpool, writerDesc *NoiseWriterDescriptor) (*UnreliableNoiseChannel, error) {
-	noiseChan, err := NewUnreliableNoiseChannel(spoolReceiver, spoolProvider, spool)
+func NewUnreliableNoiseChannelWithRemoteDescriptor(spoolReceiver, spoolProvider string, spoolService session.SpoolService, writerDesc *NoiseWriterDescriptor) (*UnreliableNoiseChannel, error) {
+	noiseChan, err := NewUnreliableNoiseChannel(spoolReceiver, spoolProvider, spoolService)
 	if err != nil {
 		return nil, err
 	}
@@ -227,14 +219,14 @@ func (s *UnreliableNoiseChannel) WithRemoteWriterDescriptor(writerDesc *NoiseWri
 }
 
 func (s *UnreliableNoiseChannel) Read() ([]byte, error) {
-	return s.readerChan.Read(s.spool)
+	return s.readerChan.Read(s.spoolService)
 }
 
 func (s *UnreliableNoiseChannel) Write(message []byte) error {
 	if s.writerChan == nil {
 		return errors.New("writerChan must not be nil")
 	}
-	return s.writerChan.Write(s.spool, message)
+	return s.writerChan.Write(s.spoolService, message)
 }
 
 func (s *UnreliableNoiseChannel) MarshalBinary() ([]byte, error) {
@@ -259,4 +251,8 @@ func (s *UnreliableNoiseChannel) UnmarshalBinary(data []byte) error {
 	s.writerChan = n.WriterChan
 	s.readerChan = n.ReaderChan
 	return nil
+}
+
+func (s *UnreliableNoiseChannel) SetSpoolService(spoolService session.SpoolService) {
+	s.spoolService = spoolService
 }

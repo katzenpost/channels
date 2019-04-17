@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/katzenpost/client/multispool"
+	"github.com/katzenpost/client/session"
 	"github.com/katzenpost/core/crypto/eddsa"
 	"github.com/stretchr/testify/assert"
 )
@@ -62,7 +63,14 @@ func (m *mockRemoteSpool) AppendToSpool(spoolID []byte, message []byte, spoolRec
 	return nil
 }
 
-func newMockRemoteSpool() RemoteSpool {
+func (m *mockRemoteSpool) PurgeSpool(spoolID []byte, privKey *eddsa.PrivateKey, recipient, provider string) error {
+	id := [multispool.SpoolIDSize]byte{}
+	copy(id[:], spoolID)
+	m.spool[id] = make(map[uint32][]byte)
+	return nil
+}
+
+func newMockRemoteSpool() session.SpoolService {
 	return &mockRemoteSpool{
 		spool:  make(map[[multispool.SpoolIDSize]byte]map[uint32][]byte),
 		offset: make(map[[multispool.SpoolIDSize]byte]uint32),
@@ -148,7 +156,7 @@ modern political parlance. The author offered mix nets for a solution. 50`)
 	chanC := new(UnreliableNoiseChannel)
 	err = chanC.UnmarshalBinary(chanCSerialized)
 	assert.NoError(err)
-	chanC.spool = chanA.spool
+	chanC.SetSpoolService(chanA.spoolService)
 
 	// and then chanB writes to chanC
 	msg2 := []byte(`Chaum would go on to provide the founding ideas for anonymous electronic
