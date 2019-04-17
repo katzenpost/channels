@@ -17,107 +17,45 @@
 package channels
 
 import (
-	"encoding/binary"
-
 	"github.com/katzenpost/core/crypto/rand"
-	"github.com/status-im/doubleratchet"
+	ratchet "github.com/katzenpost/doubleratchet"
 )
 
 const DoubleRatchetOverhead = 144
 
-type UnreliableDoubleRatchetChannelDescriptor struct {
-	publicKey        doubleratchet.Key
-	sharedKey        [32]byte
-	sharedHeaderKeyA [32]byte
-	sharedHeaderKeyB [32]byte
-}
-
 type UnreliableDoubleRatchetChannel struct {
 	noiseCh *UnreliableNoiseChannel
-
-	keyPair          doubleratchet.DHPair
-	sharedKey        [32]byte
-	sharedHeaderKeyA [32]byte
-	sharedHeaderKeyB [32]byte
-
-	ratchet doubleratchet.SessionHE
+	ratchet *ratchet.Ratchet
 }
 
 func NewUnreliableDoubleRatchetChannel(noiseCh *UnreliableNoiseChannel) (*UnreliableDoubleRatchetChannel, error) {
-	sk := [32]byte{}
-	_, err := rand.Reader.Read(sk[:])
+	ratchet, err := ratchet.New(rand.Reader)
 	if err != nil {
 		return nil, err
 	}
-	sharedHka := [32]byte{}
-	_, err = rand.Reader.Read(sharedHka[:])
-	if err != nil {
-		return nil, err
-	}
-	sharedNhkb := [32]byte{}
-	_, err = rand.Reader.Read(sharedNhkb[:])
-	if err != nil {
-		return nil, err
-	}
-	keyPair, err := doubleratchet.DefaultCrypto{}.GenerateDH()
-	if err != nil {
-		return nil, err
-	}
-	ratchet, err := doubleratchet.NewHE(sk, sharedHka, sharedNhkb, keyPair)
 	return &UnreliableDoubleRatchetChannel{
-		noiseCh:          noiseCh,
-		sharedKey:        sk,
-		sharedHeaderKeyA: sharedHka,
-		sharedHeaderKeyB: sharedNhkb,
-		keyPair:          keyPair,
-		ratchet:          ratchet,
+		noiseCh: noiseCh,
+		ratchet: ratchet,
 	}, nil
 }
 
-func NewUnreliableDoubleRatchetChannelWithRemoteDescriptor(noiseCh *UnreliableNoiseChannel, desc *UnreliableDoubleRatchetChannelDescriptor) (*UnreliableDoubleRatchetChannel, error) {
-	ratchet, err := doubleratchet.NewHEWithRemoteKey(desc.sharedKey, desc.sharedHeaderKeyA, desc.sharedHeaderKeyB, desc.publicKey)
-	if err != nil {
-		return nil, err
-	}
-
-	return &UnreliableDoubleRatchetChannel{
-		noiseCh:          noiseCh,
-		sharedKey:        desc.sharedKey,
-		sharedHeaderKeyA: desc.sharedHeaderKeyA,
-		sharedHeaderKeyB: desc.sharedHeaderKeyB,
-		ratchet:          ratchet,
-	}, nil
+func (r *UnreliableDoubleRatchetChannel) ProcessKeyExchange(kxsBytes []byte) error {
+	return r.ratchet.ProcessKeyExchange(kxsBytes)
 }
 
-func (r *UnreliableDoubleRatchetChannel) GetDescriptor() *UnreliableDoubleRatchetChannelDescriptor {
-	return &UnreliableDoubleRatchetChannelDescriptor{
-		publicKey:        r.keyPair.PublicKey(),
-		sharedKey:        r.sharedKey,
-		sharedHeaderKeyA: r.sharedHeaderKeyA,
-		sharedHeaderKeyB: r.sharedHeaderKeyB,
-	}
+func (r *UnreliableDoubleRatchetChannel) KeyExchange() ([]byte, error) {
+	return r.ratchet.CreateKeyExchange()
 }
 
 func (r *UnreliableDoubleRatchetChannel) Write(message []byte) error {
-	mesgHE := r.ratchet.RatchetEncrypt(message, nil)
-	ciphertext := make([]byte, len(mesgHE.Header)+len(mesgHE.Ciphertext)+8)
-	binary.BigEndian.PutUint32(ciphertext[:4], uint32(len(mesgHE.Header)))
-	copy(ciphertext[4:], mesgHE.Header)
-	binary.BigEndian.PutUint32(ciphertext[4+len(mesgHE.Header):], uint32(len(mesgHE.Ciphertext)))
-	copy(ciphertext[4+len(mesgHE.Header)+4:], mesgHE.Ciphertext)
+	ciphertext := r.ratchet.Encrypt(nil, message)
 	return r.noiseCh.Write(ciphertext)
 }
 
 func (r *UnreliableDoubleRatchetChannel) Read() ([]byte, error) {
-	mesgRaw, err := r.noiseCh.Read()
+	ciphertext, err := r.noiseCh.Read()
 	if err != nil {
 		return nil, err
 	}
-	headerLen := binary.BigEndian.Uint32(mesgRaw[:4])
-	ciphertextLen := binary.BigEndian.Uint32(mesgRaw[4+headerLen : 4+headerLen+4])
-	mesgHE := &doubleratchet.MessageHE{
-		Header:     mesgRaw[4 : headerLen+4],
-		Ciphertext: mesgRaw[4+headerLen+4 : ciphertextLen+4+headerLen+4],
-	}
-	return r.ratchet.RatchetDecrypt(*mesgHE, nil)
+	return r.ratchet.Decrypt(ciphertext)
 }

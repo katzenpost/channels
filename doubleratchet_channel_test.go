@@ -25,11 +25,20 @@ func TestSimpleDoubleRatchet(t *testing.T) {
 	assert := assert.New(t)
 
 	chanA, chanB := newTestNoiseChannelPair(t)
+
 	ratchetChanA, err := NewUnreliableDoubleRatchetChannel(chanA)
 	assert.NoError(err)
+	ratchetChanB, err := NewUnreliableDoubleRatchetChannel(chanB)
+	assert.NoError(err)
 
-	descA := ratchetChanA.GetDescriptor()
-	ratchetChanB, err := NewUnreliableDoubleRatchetChannelWithRemoteDescriptor(chanB, descA)
+	kxA, err := ratchetChanA.KeyExchange()
+	assert.NoError(err)
+	kxB, err := ratchetChanB.KeyExchange()
+	assert.NoError(err)
+
+	err = ratchetChanA.ProcessKeyExchange(kxB)
+	assert.NoError(err)
+	err = ratchetChanB.ProcessKeyExchange(kxA)
 	assert.NoError(err)
 
 	msg1 := []byte(`1. Privacy is personal good. It’s about your desire to control personal informa-
