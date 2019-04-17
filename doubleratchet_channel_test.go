@@ -97,3 +97,46 @@ it, one might carve out a space free of power’s reach.`)
 	assert.NoError(err)
 	assert.Equal(msg2, msg2Read)
 }
+
+func TestSerializationOfTheDoubleRatchet(t *testing.T) {
+	assert := assert.New(t)
+
+	chanA, chanB := newTestNoiseChannelPair(t)
+
+	ratchetChanA, err := NewUnreliableDoubleRatchetChannel(chanA)
+	assert.NoError(err)
+	ratchetChanB, err := NewUnreliableDoubleRatchetChannel(chanB)
+	assert.NoError(err)
+
+	kxA, err := ratchetChanA.KeyExchange()
+	assert.NoError(err)
+	kxB, err := ratchetChanB.KeyExchange()
+	assert.NoError(err)
+
+	err = ratchetChanA.ProcessKeyExchange(kxB)
+	assert.NoError(err)
+	err = ratchetChanB.ProcessKeyExchange(kxA)
+	assert.NoError(err)
+
+	msg1 := []byte("test message one")
+	err = ratchetChanA.Write(msg1)
+	assert.NoError(err)
+
+	msg1Read, err := ratchetChanB.Read()
+	assert.NoError(err)
+	assert.Equal(msg1, msg1Read)
+
+	blobA, err := ratchetChanA.Save()
+	assert.NoError(err)
+	ratchetChanC, err := Load(blobA, ratchetChanA.NoiseCh.spoolService)
+	assert.NoError(err)
+
+	msg2 := []byte("test message two")
+	err = ratchetChanC.Write(msg2)
+	assert.NoError(err)
+
+	msg2Read, err := ratchetChanB.Read()
+	assert.NoError(err)
+	assert.Equal(msg2, msg2Read)
+
+}
