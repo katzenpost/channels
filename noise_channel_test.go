@@ -126,8 +126,40 @@ of power. 52`)
 
 func TestSimpleNoiseChannelSerialize(t *testing.T) {
 	assert := assert.New(t)
-	chanA, _ := newTestNoiseChannelPair(t)
-	s, err := chanA.MarshalBinary()
+	chanA, chanB := newTestNoiseChannelPair(t)
+
+	// firstly, we test that the channel is working with one write and one read
+	msg1 := []byte(`Chaum’s 1981 paper 49 Untraceable Electronic Mail, Return Addresses, and
+Digital Pseudonyms, [Chaum81], suggests that a crucial privacy goal when
+sending an email is to hide who is communicating with whom. The metadata, in
+modern political parlance. The author offered mix nets for a solution. 50`)
+	err := chanA.Write(msg1)
 	assert.NoError(err)
-	assert.True(len(s) > 1)
+
+	msg1Read, err := chanB.Read()
+	assert.NoError(err)
+	assert.Equal(msg1, msg1Read)
+
+	// then we replace chanA with chanC
+	chanCSerialized, err := chanA.MarshalBinary()
+	assert.NoError(err)
+	assert.True(len(chanCSerialized) > 1)
+
+	chanC := new(UnreliableNoiseChannel)
+	err = chanC.UnmarshalBinary(chanCSerialized)
+	assert.NoError(err)
+	chanC.spool = chanA.spool
+
+	// and then chanB writes to chanC
+	msg2 := []byte(`Chaum would go on to provide the founding ideas for anonymous electronic
+		cash and electronic voting. His papers would routinely draw on overtly political
+		motivations. 51 In a recent conversation, Chaum expressed surprise at the extent
+		to which academics gravitated to a field—cryptography—so connected to issues
+		of power. 52`)
+	err = chanB.Write(msg2)
+	assert.NoError(err)
+
+	msg2Read, err := chanC.Read()
+	assert.NoError(err)
+	assert.Equal(msg2, msg2Read)
 }

@@ -249,3 +249,14 @@ func (s *UnreliableNoiseChannel) MarshalBinary() ([]byte, error) {
 	}
 	return serialized, nil
 }
+
+func (s *UnreliableNoiseChannel) UnmarshalBinary(data []byte) error {
+	n := new(SerializedUnreliableNoiseChannel)
+	err := codec.NewDecoderBytes(data, cborHandle).Decode(&n)
+	if err != nil {
+		return err
+	}
+	s.writerChan = n.WriterChan
+	s.readerChan = n.ReaderChan
+	return nil
+}
