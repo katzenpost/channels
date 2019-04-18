@@ -28,24 +28,23 @@ import (
 )
 
 const (
-	DoubleRatchetOverhead = 144
-	CBOROverhead          = 24
-	PayloadLength         = constants.UserForwardPayloadLength - DoubleRatchetOverhead - NoiseOverhead
-	PayloadOutputLength   = PayloadLength + CBOROverhead - (4 + 75)
+	DoubleRatchetOverhead        = 144
+	DoubleRatchetChannelOverhead = DoubleRatchetOverhead + SpoolChannelOverhead
+	DoubleRatchetPayloadLength   = constants.UserForwardPayloadLength - DoubleRatchetChannelOverhead
 )
 
 type UnreliableDoubleRatchetChannel struct {
-	NoiseCh *UnreliableNoiseChannel
+	SpoolCh *UnreliableSpoolChannel
 	Ratchet *ratchet.Ratchet
 }
 
-func NewUnreliableDoubleRatchetChannel(noiseCh *UnreliableNoiseChannel) (*UnreliableDoubleRatchetChannel, error) {
+func NewUnreliableDoubleRatchetChannel(spoolCh *UnreliableSpoolChannel) (*UnreliableDoubleRatchetChannel, error) {
 	ratchet, err := ratchet.New(rand.Reader)
 	if err != nil {
 		return nil, err
 	}
 	return &UnreliableDoubleRatchetChannel{
-		NoiseCh: noiseCh,
+		SpoolCh: spoolCh,
 		Ratchet: ratchet,
 	}, nil
 }
@@ -59,18 +58,18 @@ func (r *UnreliableDoubleRatchetChannel) KeyExchange() ([]byte, error) {
 }
 
 func (r *UnreliableDoubleRatchetChannel) Write(message []byte) error {
-	if len(message) > PayloadLength {
+	if len(message) > DoubleRatchetPayloadLength {
 		return errors.New("exceeds payload maximum")
 	}
-	payload := [PayloadOutputLength]byte{}
+	payload := [DoubleRatchetPayloadLength]byte{}
 	binary.BigEndian.PutUint32(payload[:4], uint32(len(message)))
 	copy(payload[4:], message)
 	ciphertext := r.Ratchet.Encrypt(nil, payload[:])
-	return r.NoiseCh.Write(ciphertext[:])
+	return r.SpoolCh.Write(ciphertext[:])
 }
 
 func (r *UnreliableDoubleRatchetChannel) Read() ([]byte, error) {
-	ciphertext, err := r.NoiseCh.Read()
+	ciphertext, err := r.SpoolCh.Read()
 	if err != nil {
 		return nil, err
 	}
@@ -102,6 +101,6 @@ func Load(data []byte, spoolService client.SpoolService) (*UnreliableDoubleRatch
 	if err != nil {
 		return nil, err
 	}
-	s.NoiseCh.SetSpoolService(spoolService)
+	s.SpoolCh.SetSpoolService(spoolService)
 	return s, nil
 }

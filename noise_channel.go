@@ -18,7 +18,9 @@ package channels
 
 import (
 	"errors"
+	"fmt"
 
+	"github.com/katzenpost/core/constants"
 	"github.com/katzenpost/core/crypto/ecdh"
 	"github.com/katzenpost/core/crypto/rand"
 	"github.com/katzenpost/memspool/client"
@@ -30,6 +32,9 @@ const (
 	NoiseOverhead = keyLength + macLength + keyLength + macLength // e, es, s, ss
 	keyLength     = 32
 	macLength     = 16
+
+	NoiseChannelOverhead = NoiseOverhead + SpoolChannelOverhead
+	NoisePayloadLength   = constants.UserForwardPayloadLength - NoiseChannelOverhead
 )
 
 type NoiseWriterDescriptor struct {
@@ -123,6 +128,11 @@ func (n *UnreliableNoiseChannel) Read() ([]byte, error) {
 }
 
 func (n *UnreliableNoiseChannel) Write(message []byte) error {
+	if len(message) > NoisePayloadLength {
+		return fmt.Errorf("exceeds noise channel payload maximum: %d > %d", len(message), NoisePayloadLength)
+		//return errors.New("exceeds noise channel payload maximum")
+	}
+
 	cs := noise.NewCipherSuite(noise.DH25519, noise.CipherChaChaPoly, noise.HashSHA256)
 	senderDH := noise.DHKey{
 		Private: n.NoisePrivateKey.Bytes(),

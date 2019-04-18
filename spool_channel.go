@@ -19,13 +19,20 @@ package channels
 import (
 	"errors"
 
+	"github.com/katzenpost/core/constants"
 	"github.com/katzenpost/core/crypto/eddsa"
 	"github.com/katzenpost/core/crypto/rand"
 	"github.com/katzenpost/memspool/client"
+	"github.com/katzenpost/memspool/common"
 	"github.com/ugorji/go/codec"
 )
 
 var cborHandle = new(codec.CborHandle)
+
+const (
+	SpoolChannelOverhead = common.QueryOverhead
+	SpoolPayloadLength   = constants.UserForwardPayloadLength - SpoolChannelOverhead
+)
 
 type UnreliableSpoolWriterChannel struct {
 	SpoolID       []byte
@@ -144,6 +151,9 @@ func (s *UnreliableSpoolChannel) Read() ([]byte, error) {
 func (s *UnreliableSpoolChannel) Write(message []byte) error {
 	if s.writerChan == nil {
 		return errors.New("writerChan must not be nil")
+	}
+	if len(message) > SpoolPayloadLength {
+		return errors.New("exceeds payload maximum")
 	}
 	return s.writerChan.Write(s.spoolService, message)
 }

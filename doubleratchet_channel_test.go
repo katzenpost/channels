@@ -27,7 +27,7 @@ import (
 func TestSimpleDoubleRatchet(t *testing.T) {
 	assert := assert.New(t)
 
-	chanA, chanB := newTestNoiseChannelPair(t)
+	chanA, chanB := newTestSpoolChannelPair(t)
 
 	ratchetChanA, err := NewUnreliableDoubleRatchetChannel(chanA)
 	assert.NoError(err)
@@ -104,7 +104,7 @@ it, one might carve out a space free of power’s reach.`)
 func TestSerializationOfTheDoubleRatchet(t *testing.T) {
 	assert := assert.New(t)
 
-	chanA, chanB := newTestNoiseChannelPair(t)
+	chanA, chanB := newTestSpoolChannelPair(t)
 
 	ratchetChanA, err := NewUnreliableDoubleRatchetChannel(chanA)
 	assert.NoError(err)
@@ -131,7 +131,7 @@ func TestSerializationOfTheDoubleRatchet(t *testing.T) {
 
 	blobA, err := ratchetChanA.Save()
 	assert.NoError(err)
-	ratchetChanC, err := Load(blobA, ratchetChanA.NoiseCh.spoolService)
+	ratchetChanC, err := Load(blobA, ratchetChanA.SpoolCh.spoolService)
 	assert.NoError(err)
 
 	msg2 := []byte("test message two")
@@ -147,7 +147,7 @@ func TestSerializationOfTheDoubleRatchet(t *testing.T) {
 func TestDoubleRatchetPadding(t *testing.T) {
 	assert := assert.New(t)
 
-	chanA, chanB := newTestNoiseChannelPair(t)
+	chanA, chanB := newTestSpoolChannelPair(t)
 
 	ratchetChanA, err := NewUnreliableDoubleRatchetChannel(chanA)
 	assert.NoError(err)
@@ -172,9 +172,9 @@ func TestDoubleRatchetPadding(t *testing.T) {
 	assert.True(ok)
 
 	spoolID := [common.SpoolIDSize]byte{}
-	copy(spoolID[:], chanA.SpoolWriterChan.SpoolID)
+	copy(spoolID[:], chanA.writerChan.SpoolID)
 	message := mock.spool[spoolID][uint32(mock.count-1)]
-	t.Logf("spool id %x", chanA.SpoolWriterChan.SpoolID)
+	t.Logf("spool id %x", chanA.writerChan.SpoolID)
 	t.Logf("message len is %d must be equal or less than %d", len(message), constants.UserForwardPayloadLength)
 	if len(message) > constants.UserForwardPayloadLength {
 		t.Fatal("ciphertext length must not exceed Sphinx packet payload maximum")
