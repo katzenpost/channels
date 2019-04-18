@@ -31,7 +31,7 @@ var cborHandle = new(codec.CborHandle)
 
 const (
 	SpoolChannelOverhead = common.QueryOverhead
-	SpoolPayloadLength   = constants.UserForwardPayloadLength - SpoolChannelOverhead
+	SpoolPayloadLength   = (constants.UserForwardPayloadLength - 4) - SpoolChannelOverhead
 )
 
 type UnreliableSpoolWriterChannel struct {

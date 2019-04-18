@@ -20,7 +20,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/katzenpost/core/constants"
 	"github.com/katzenpost/core/crypto/ecdh"
 	"github.com/katzenpost/core/crypto/rand"
 	"github.com/katzenpost/memspool/client"
@@ -33,8 +32,7 @@ const (
 	keyLength     = 32
 	macLength     = 16
 
-	NoiseChannelOverhead = NoiseOverhead + SpoolChannelOverhead
-	NoisePayloadLength   = constants.UserForwardPayloadLength - NoiseChannelOverhead
+	NoisePayloadLength = SpoolPayloadLength - NoiseOverhead
 )
 
 type NoiseWriterDescriptor struct {

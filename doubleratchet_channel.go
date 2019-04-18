@@ -20,7 +20,6 @@ import (
 	"encoding/binary"
 	"errors"
 
-	"github.com/katzenpost/core/constants"
 	"github.com/katzenpost/core/crypto/rand"
 	ratchet "github.com/katzenpost/doubleratchet"
 	"github.com/katzenpost/memspool/client"
@@ -28,9 +27,8 @@ import (
 )
 
 const (
-	DoubleRatchetOverhead        = 144
-	DoubleRatchetChannelOverhead = DoubleRatchetOverhead + SpoolChannelOverhead
-	DoubleRatchetPayloadLength   = constants.UserForwardPayloadLength - DoubleRatchetChannelOverhead
+	DoubleRatchetOverhead      = 144
+	DoubleRatchetPayloadLength = SpoolPayloadLength - DoubleRatchetOverhead
 )
 
 type UnreliableDoubleRatchetChannel struct {
@@ -58,6 +56,9 @@ func (r *UnreliableDoubleRatchetChannel) KeyExchange() ([]byte, error) {
 }
 
 func (r *UnreliableDoubleRatchetChannel) Write(message []byte) error {
+	if r.SpoolCh == nil {
+		panic("spool channel must not be nil")
+	}
 	if len(message) > DoubleRatchetPayloadLength {
 		return errors.New("exceeds payload maximum")
 	}
