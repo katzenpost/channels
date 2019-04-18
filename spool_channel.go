@@ -30,21 +30,29 @@ import (
 var cborHandle = new(codec.CborHandle)
 
 const (
+	// SpoolChannelOverhead is the number of bytes overhead from the spool CBOR encoding.
 	SpoolChannelOverhead = common.QueryOverhead
-	SpoolPayloadLength   = (constants.UserForwardPayloadLength - 4) - SpoolChannelOverhead
+
+	// SpoolPayloadLength is the length of the spool payload.
+	SpoolPayloadLength = (constants.UserForwardPayloadLength - 4) - SpoolChannelOverhead
 )
 
+// UnreliableSpoolWriterChannel is an unreliable channel which
+// writes to a remote spool.
 type UnreliableSpoolWriterChannel struct {
 	SpoolID       []byte
 	SpoolReceiver string
 	SpoolProvider string
 }
 
+// Write writes the given message to a remote spool.
 func (w *UnreliableSpoolWriterChannel) Write(spool client.SpoolService, message []byte) error {
 	err := spool.AppendToSpool(w.SpoolID[:], message, w.SpoolReceiver, w.SpoolProvider)
 	return err
 }
 
+// UnreliableSpoolReaderChannel is an unreliable channel
+// which reads from a remote spool.
 type UnreliableSpoolReaderChannel struct {
 	SpoolPrivateKey *eddsa.PrivateKey
 	SpoolID         []byte
@@ -53,6 +61,7 @@ type UnreliableSpoolReaderChannel struct {
 	ReadOffset      uint32
 }
 
+// NewUnreliableSpoolReaderChannel creates and returns a new UnreliableSpoolReaderChannel or an error.
 func NewUnreliableSpoolReaderChannel(spoolReceiver, spoolProvider string, spool client.SpoolService) (*UnreliableSpoolReaderChannel, error) {
 	// generate keys
 	spoolPrivateKey, err := eddsa.NewKeypair(rand.Reader)
@@ -75,6 +84,8 @@ func NewUnreliableSpoolReaderChannel(spoolReceiver, spoolProvider string, spool 
 	}, nil
 }
 
+// GetSpoolWriter returns an UnreliableSpoolWriterChannel which
+// writes to the spool that this spool reader channel is reading.
 func (s *UnreliableSpoolReaderChannel) GetSpoolWriter() *UnreliableSpoolWriterChannel {
 	return &UnreliableSpoolWriterChannel{
 		SpoolID:       s.SpoolID,
@@ -83,6 +94,7 @@ func (s *UnreliableSpoolReaderChannel) GetSpoolWriter() *UnreliableSpoolWriterCh
 	}
 }
 
+// Read reads and returns a message from a remote spool.
 func (s *UnreliableSpoolReaderChannel) Read(spool client.SpoolService) ([]byte, error) {
 	spoolResponse, err := spool.ReadFromSpool(s.SpoolID[:], s.ReadOffset, s.SpoolPrivateKey, s.SpoolReceiver, s.SpoolProvider)
 	if err != nil {
@@ -96,17 +108,20 @@ func (s *UnreliableSpoolReaderChannel) Read(spool client.SpoolService) ([]byte, 
 	return spoolResponse.Message, nil
 }
 
+// SerializedUnreliableSpoolChannel is a type used to serialize/save the UnreliableSpoolChannel type.
 type SerializedUnreliableSpoolChannel struct {
 	WriterChan *UnreliableSpoolWriterChannel
 	ReaderChan *UnreliableSpoolReaderChannel
 }
 
+// UnreliableSpoolChannel is an unreliable channel which reads and writes to a remote spool.
 type UnreliableSpoolChannel struct {
 	spoolService client.SpoolService
 	writerChan   *UnreliableSpoolWriterChannel
 	readerChan   *UnreliableSpoolReaderChannel
 }
 
+// LoadUnreliableSpoolChannel loads an UnreliableSpoolChannel from it's serialized form.
 func LoadUnreliableSpoolChannel(data []byte, spoolService client.SpoolService) (*UnreliableSpoolChannel, error) {
 	ch := new(UnreliableSpoolChannel)
 	err := ch.UnmarshalBinary(data)
@@ -117,6 +132,7 @@ func LoadUnreliableSpoolChannel(data []byte, spoolService client.SpoolService) (
 	return ch, nil
 }
 
+// NewUnreliableSpoolChannel creates and returns a new UnreliableSpoolChannel.
 func NewUnreliableSpoolChannel(spoolReceiver, spoolProvider string, spool client.SpoolService) (*UnreliableSpoolChannel, error) {
 	readerChan, err := NewUnreliableSpoolReaderChannel(spoolReceiver, spoolProvider, spool)
 	if err != nil {
@@ -129,10 +145,13 @@ func NewUnreliableSpoolChannel(spoolReceiver, spoolProvider string, spool client
 	}, nil
 }
 
+// GetSpoolWriter returns a UnreliableSpoolWriterChannel which writes to
+// the spool that this UnreliableSpoolChannel is reading from.
 func (s *UnreliableSpoolChannel) GetSpoolWriter() *UnreliableSpoolWriterChannel {
 	return s.readerChan.GetSpoolWriter()
 }
 
+// WithRemoteWriter sets this channels writer to the given UnreliableSpoolWriterChannel.
 func (s *UnreliableSpoolChannel) WithRemoteWriter(writer *UnreliableSpoolWriterChannel) error {
 	if writer == nil {
 		return errors.New("writer must not be nil")
@@ -144,10 +163,12 @@ func (s *UnreliableSpoolChannel) WithRemoteWriter(writer *UnreliableSpoolWriterC
 	return nil
 }
 
+// Read reads and returns a message from the remote spool.
 func (s *UnreliableSpoolChannel) Read() ([]byte, error) {
 	return s.readerChan.Read(s.spoolService)
 }
 
+// Write writes a message to the remote spool.
 func (s *UnreliableSpoolChannel) Write(message []byte) error {
 	if s.writerChan == nil {
 		return errors.New("writerChan must not be nil")
@@ -158,6 +179,7 @@ func (s *UnreliableSpoolChannel) Write(message []byte) error {
 	return s.writerChan.Write(s.spoolService, message)
 }
 
+// MarshalBinary serializes this channel.
 func (s *UnreliableSpoolChannel) MarshalBinary() ([]byte, error) {
 	var serialized []byte
 	enc := codec.NewEncoderBytes(&serialized, cborHandle)
@@ -171,6 +193,7 @@ func (s *UnreliableSpoolChannel) MarshalBinary() ([]byte, error) {
 	return serialized, nil
 }
 
+// UnmarshalBinary deserializes this channel.
 func (s *UnreliableSpoolChannel) UnmarshalBinary(data []byte) error {
 	n := new(SerializedUnreliableSpoolChannel)
 	err := codec.NewDecoderBytes(data, cborHandle).Decode(&n)
@@ -182,10 +205,12 @@ func (s *UnreliableSpoolChannel) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
+// SetSpoolService sets this channels spoolService.
 func (s *UnreliableSpoolChannel) SetSpoolService(spoolService client.SpoolService) {
 	s.spoolService = spoolService
 }
 
+// Save serializes this channel.
 func (s *UnreliableSpoolChannel) Save() ([]byte, error) {
 	return s.MarshalBinary()
 }

@@ -28,18 +28,24 @@ import (
 )
 
 const (
+	// NoiseOverhead is amount of bytes overhead from the noise encryption.
 	NoiseOverhead = keyLength + macLength + keyLength + macLength // e, es, s, ss
 	keyLength     = 32
 	macLength     = 16
 
+	// NoisePayloadLength is the length of the noise payload.
 	NoisePayloadLength = SpoolPayloadLength - NoiseOverhead
 )
 
+// NoiseWriterDescriptor contains the information necessary
+// to write to a remote spool.
 type NoiseWriterDescriptor struct {
 	SpoolWriterChan      *UnreliableSpoolWriterChannel
 	RemoteNoisePublicKey *ecdh.PublicKey
 }
 
+// UnreliableNoiseChannel is an unreliable channel which encrypts using
+// the Noise X one-way pattern.
 type UnreliableNoiseChannel struct {
 	spoolService client.SpoolService
 
@@ -51,6 +57,7 @@ type UnreliableNoiseChannel struct {
 	ReadOffset      uint32
 }
 
+// NewUnreliableNoiseChannel creates and returns a new UnreliableNoiseChannel or an error.
 func NewUnreliableNoiseChannel(spoolReceiver, spoolProvider string, spool client.SpoolService) (*UnreliableNoiseChannel, error) {
 	noisePrivateKey, err := ecdh.NewKeypair(rand.Reader)
 	if err != nil {
@@ -70,6 +77,7 @@ func NewUnreliableNoiseChannel(spoolReceiver, spoolProvider string, spool client
 	}, nil
 }
 
+// WithRemoteWriter allows this channel to write to a remote spool.
 func (n *UnreliableNoiseChannel) WithRemoteWriter(writerDesc *NoiseWriterDescriptor) {
 	if writerDesc.SpoolWriterChan == nil || writerDesc.RemoteNoisePublicKey == nil {
 		panic("writer channel must not be nil")
@@ -78,6 +86,8 @@ func (n *UnreliableNoiseChannel) WithRemoteWriter(writerDesc *NoiseWriterDescrip
 	n.RemoteNoisePublicKey = writerDesc.RemoteNoisePublicKey
 }
 
+// GetRemoteWriter returns a NoiseWriterDescriptor which describes how
+// a writer can write to the spool we are reading.
 func (n *UnreliableNoiseChannel) GetRemoteWriter() *NoiseWriterDescriptor {
 	return &NoiseWriterDescriptor{
 		SpoolWriterChan:      n.SpoolReaderChan.GetSpoolWriter(),
@@ -85,6 +95,7 @@ func (n *UnreliableNoiseChannel) GetRemoteWriter() *NoiseWriterDescriptor {
 	}
 }
 
+// Read reads from a remote spool and decrypts.
 func (n *UnreliableNoiseChannel) Read() ([]byte, error) {
 	ciphertext, err := n.SpoolReaderChan.Read(n.spoolService)
 	if err != nil {
@@ -125,6 +136,7 @@ func (n *UnreliableNoiseChannel) Read() ([]byte, error) {
 	return plaintext, nil
 }
 
+// Write encrypts and write to a remote spool.
 func (n *UnreliableNoiseChannel) Write(message []byte) error {
 	if len(message) > NoisePayloadLength {
 		return fmt.Errorf("exceeds noise channel payload maximum: %d > %d", len(message), NoisePayloadLength)
@@ -154,10 +166,13 @@ func (n *UnreliableNoiseChannel) Write(message []byte) error {
 	return n.SpoolWriterChan.Write(n.spoolService, ciphertext)
 }
 
+// SetSpoolService sets this channel's spoolService field.
 func (n *UnreliableNoiseChannel) SetSpoolService(spoolService client.SpoolService) {
 	n.spoolService = spoolService
 }
 
+// Save returns a serialized form of this channel suitable to be
+// reloaded for later use.
 func (n *UnreliableNoiseChannel) Save() ([]byte, error) {
 	var serialized []byte
 	enc := codec.NewEncoderBytes(&serialized, cborHandle)
@@ -167,6 +182,8 @@ func (n *UnreliableNoiseChannel) Save() ([]byte, error) {
 	return serialized, nil
 }
 
+// LoadUnreliableNoiseChannel loads a serialized channel and sets it's spoolService so that
+// it may be used.
 func LoadUnreliableNoiseChannel(data []byte, spoolService client.SpoolService) (*UnreliableNoiseChannel, error) {
 	n := new(UnreliableNoiseChannel)
 	err := codec.NewDecoderBytes(data, cborHandle).Decode(n)

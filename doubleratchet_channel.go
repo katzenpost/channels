@@ -27,15 +27,36 @@ import (
 )
 
 const (
-	DoubleRatchetOverhead      = 144
+	// DoubleRatchetOverhead is the number of bytes the ratchet adds in ciphertext overhead.
+	DoubleRatchetOverhead = 144
+
+	// DoubleRatchetPayloadLength is the length of the payload encrypted by the ratchet.
 	DoubleRatchetPayloadLength = SpoolPayloadLength - DoubleRatchetOverhead
 )
 
+// UnreliableDoubleRatchetChannel is an unreliable channel which encrypts using the double ratchet.
 type UnreliableDoubleRatchetChannel struct {
 	SpoolCh *UnreliableSpoolChannel
 	Ratchet *ratchet.Ratchet
 }
 
+// LoadUnreliableDoubleRatchetChannel loads the channel given the saved blob and a SpoolService interface.
+func LoadUnreliableDoubleRatchetChannel(data []byte, spoolService client.SpoolService) (*UnreliableDoubleRatchetChannel, error) {
+	var err error
+	s := new(UnreliableDoubleRatchetChannel)
+	s.Ratchet, err = ratchet.New(rand.Reader)
+	if err != nil {
+		return nil, err
+	}
+	err = codec.NewDecoderBytes(data, cborHandle).Decode(s)
+	if err != nil {
+		return nil, err
+	}
+	s.SpoolCh.SetSpoolService(spoolService)
+	return s, nil
+}
+
+// NewUnreliableDoubleRatchetChannel creates a new UnreliableDoubleRatchetChannel.
 func NewUnreliableDoubleRatchetChannel(spoolCh *UnreliableSpoolChannel) (*UnreliableDoubleRatchetChannel, error) {
 	ratchet, err := ratchet.New(rand.Reader)
 	if err != nil {
@@ -47,14 +68,18 @@ func NewUnreliableDoubleRatchetChannel(spoolCh *UnreliableSpoolChannel) (*Unreli
 	}, nil
 }
 
+// ProcessKeyExchange processes the given key exchange blob.
 func (r *UnreliableDoubleRatchetChannel) ProcessKeyExchange(kxsBytes []byte) error {
 	return r.Ratchet.ProcessKeyExchange(kxsBytes)
 }
 
+// KeyExchange returns a key exchange blob or an error.
 func (r *UnreliableDoubleRatchetChannel) KeyExchange() ([]byte, error) {
 	return r.Ratchet.CreateKeyExchange()
 }
 
+// Write writes a message, encrypting it with the double ratchet and
+// sending the ciphertext to the remote spool.
 func (r *UnreliableDoubleRatchetChannel) Write(message []byte) error {
 	if r.SpoolCh == nil {
 		panic("spool channel must not be nil")
@@ -69,6 +94,8 @@ func (r *UnreliableDoubleRatchetChannel) Write(message []byte) error {
 	return r.SpoolCh.Write(ciphertext[:])
 }
 
+// Read reads ciphertext from a remote spool and decypts
+// it with the double ratchet.
 func (r *UnreliableDoubleRatchetChannel) Read() ([]byte, error) {
 	ciphertext, err := r.SpoolCh.Read()
 	if err != nil {
@@ -82,26 +109,13 @@ func (r *UnreliableDoubleRatchetChannel) Read() ([]byte, error) {
 	return plaintext[4 : 4+payloadLen], nil
 }
 
-func (s *UnreliableDoubleRatchetChannel) Save() ([]byte, error) {
+// Save returns the serialization of this channel suitable to
+// be used to "load" this channel and make use of it in the future.
+func (r *UnreliableDoubleRatchetChannel) Save() ([]byte, error) {
 	var serialized []byte
 	enc := codec.NewEncoderBytes(&serialized, cborHandle)
-	if err := enc.Encode(s); err != nil {
+	if err := enc.Encode(r); err != nil {
 		return nil, err
 	}
 	return serialized, nil
-}
-
-func Load(data []byte, spoolService client.SpoolService) (*UnreliableDoubleRatchetChannel, error) {
-	var err error
-	s := new(UnreliableDoubleRatchetChannel)
-	s.Ratchet, err = ratchet.New(rand.Reader)
-	if err != nil {
-		return nil, err
-	}
-	err = codec.NewDecoderBytes(data, cborHandle).Decode(s)
-	if err != nil {
-		return nil, err
-	}
-	s.SpoolCh.SetSpoolService(spoolService)
-	return s, nil
 }
