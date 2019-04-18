@@ -131,7 +131,7 @@ func TestSerializationOfTheDoubleRatchet(t *testing.T) {
 
 	blobA, err := ratchetChanA.Save()
 	assert.NoError(err)
-	ratchetChanC, err := Load(blobA, ratchetChanA.SpoolCh.spoolService)
+	ratchetChanC, err := LoadUnreliableDoubleRatchetChannel(blobA, ratchetChanA.SpoolCh.spoolService)
 	assert.NoError(err)
 
 	msg2 := []byte("test message two")
