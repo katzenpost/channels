@@ -24,6 +24,45 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestSimpleDoubleExchangeRatchet(t *testing.T) {
+	assert := assert.New(t)
+
+	chanA, chanB := newTestSpoolChannelPair(t)
+	chanA.writerChan = nil
+	chanB.writerChan = nil
+	ratchetChanA, err := NewUnreliableDoubleRatchetChannel(chanA)
+	assert.NoError(err)
+	ratchetChanB, err := NewUnreliableDoubleRatchetChannel(chanB)
+	assert.NoError(err)
+
+	exchangeA, err := ratchetChanA.ChannelExchange()
+	assert.NoError(err)
+	exchangeB, err := ratchetChanB.ChannelExchange()
+	assert.NoError(err)
+
+	err = ratchetChanB.ProcessChannelExchange(exchangeA)
+	assert.NoError(err)
+	err = ratchetChanA.ProcessChannelExchange(exchangeB)
+	assert.NoError(err)
+
+	msg1 := []byte(`At best, cryptography might be a tool for creating possibilities within contours
+circumscribed by other forces.`)
+	err = ratchetChanA.Write(msg1)
+	assert.NoError(err)
+
+	msg1Read, err := ratchetChanB.Read()
+	assert.NoError(err)
+	assert.Equal(msg1, msg1Read)
+
+	msg2 := []byte("Scientist or spy?")
+	err = ratchetChanB.Write(msg2)
+	assert.NoError(err)
+
+	msg2Read, err := ratchetChanA.Read()
+	assert.NoError(err)
+	assert.Equal(msg2, msg2Read)
+}
+
 func TestSimpleDoubleRatchet(t *testing.T) {
 	assert := assert.New(t)
 
