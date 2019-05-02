@@ -213,6 +213,8 @@ func TestDoubleRatchetPadding(t *testing.T) {
 	spoolID := [common.SpoolIDSize]byte{}
 	copy(spoolID[:], chanA.writerChan.SpoolID)
 	message := mock.spool[spoolID][uint32(mock.count-1)]
+
+	assert.Equal(len(message), constants.UserForwardPayloadLength-SpoolChannelOverhead-4)
 	t.Logf("spool id %x", chanA.writerChan.SpoolID)
 	t.Logf("message len is %d must be equal or less than %d", len(message), constants.UserForwardPayloadLength)
 	if len(message) > constants.UserForwardPayloadLength {
