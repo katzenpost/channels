@@ -27,11 +27,8 @@ import (
 )
 
 const (
-	// DoubleRatchetOverhead is the number of bytes the ratchet adds in ciphertext overhead.
-	DoubleRatchetOverhead = 120
-
 	// DoubleRatchetPayloadLength is the length of the payload encrypted by the ratchet.
-	DoubleRatchetPayloadLength = SpoolPayloadLength - DoubleRatchetOverhead
+	DoubleRatchetPayloadLength = SpoolPayloadLength - ratchet.DoubleRatchetOverhead
 )
 
 // UnreliableDoubleRatchetChannelExchange is exchanged between endpoints
